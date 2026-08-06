@@ -1,0 +1,43 @@
+name: ntfy
+
+services:
+  ntfy:
+    image: binwiederhier/ntfy
+    container_name: ntfy
+    restart: unless-stopped
+    command: serve --config /etc/ntfy/server.yml
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+    configs:
+      - source: ntfy_config
+        target: /etc/ntfy/server.yml
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ntfy.rule=Host(`ntfy.lab.yourdomain.com`)"
+      - "traefik.http.routers.ntfy.entrypoints=websecure"
+      - "traefik.http.routers.ntfy.tls.certresolver=cloudflare"
+      - "traefik.http.services.ntfy.loadbalancer.server.port=80"
+
+configs:
+  ntfy_config:
+    content: |
+      base-url: https://ntfy.lab.yourdomain.com
+
+      # Relay through ntfy.sh for iOS push — no account needed, relay is anonymous
+      upstream-base-url: https://ntfy.sh
+
+      # Honor X-Forwarded-For from Traefik so the rate-limiter sees real client
+      # IPs instead of treating every request as the Traefik container's IP.
+      behind-proxy: true
+
+      cache-file: /var/cache/ntfy/cache.db
+      cache-duration: 12h
+
+volumes:
+  ntfy-cache:
+
+networks:
+  traefik-proxy:
+    external: true

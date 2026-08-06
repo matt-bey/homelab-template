@@ -1,0 +1,31 @@
+# /etc/nut/upsmon.conf — copy to upsmon.conf and set the real password (gitignored).
+#
+#   cp upsmon.conf.example upsmon.conf   # then edit the MONITOR password
+#
+# This host is MASTER: it owns the UPS and orchestrates shutdown of everything
+# above it (VMs, then itself) plus the UDM-SE, which cannot be a NUT client.
+
+# MONITOR <ups>@<host> <powervalue> <user> <pass> ("master"|"slave")
+#   powervalue = number of power supplies this UPS feeds on this host.
+MONITOR cp1500@localhost 1 upsmon CHANGEME_upsmon_password master
+
+MINSUPPLIES 1
+
+# Final graceful shutdown, fired by upsmon when the UPS reaches LOWBATT (LB).
+# The staged actions (T+5 PoE shed, T+10 container shed) live in upssched.conf;
+# this is the end-of-ride halt of this host itself.
+SHUTDOWNCMD "/sbin/shutdown -h +0"
+
+# Route every NOTIFY event through upssched so it can run staged timers/scripts.
+NOTIFYCMD /usr/sbin/upssched
+
+# Which events to act on. EXEC = hand to NOTIFYCMD (upssched).
+NOTIFYFLAG ONBATT   SYSLOG+WALL+EXEC
+NOTIFYFLAG ONLINE   SYSLOG+WALL+EXEC
+NOTIFYFLAG LOWBATT  SYSLOG+WALL+EXEC
+NOTIFYFLAG COMMBAD  SYSLOG+WALL
+NOTIFYFLAG COMMOK   SYSLOG+WALL
+NOTIFYFLAG SHUTDOWN SYSLOG+WALL
+
+POLLFREQ 5
+POLLFREQALERT 5

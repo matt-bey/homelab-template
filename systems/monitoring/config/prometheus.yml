@@ -1,0 +1,114 @@
+# Prometheus scrape configuration for the homelab monitoring stack.
+# See systems/monitoring/plan.md for the two-layer node_exporter design.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # External labels are attached to every alert and to federation requests.
+  # Useful when this Prometheus is ever scraped by another (not today).
+  external_labels:
+    environment: homelab
+
+scrape_configs:
+  # Prometheus scrapes itself — gives us TSDB health and ingestion-rate metrics.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          instance: prometheus
+
+  # cAdvisor — per-container CPU/memory/network breakdown on docker-host.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels:
+          instance: docker-host
+
+  # In-VM node_exporter — docker-host's view of its own disk/RAM/network.
+  - job_name: node-exporter-vm
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: docker-host
+
+  # Bare-metal node_exporter — Proxmox host's view (LVM-thin pool, host RAM).
+  # Reached as a static target by mDNS hostname; if .local resolution fails
+  # from docker-host, replace with the LAN IP and note the reason in
+  # systems/monitoring/notes.md.
+  - job_name: node-exporter-host
+    static_configs:
+      - targets: ["<homelab-server-ip>:9100"]
+        labels:
+          instance: homelab-server
+
+  # Traefik metrics on the internal :8082 entryPoint (no host port publish).
+  # See systems/traefik/config/compose.yaml for the metrics entryPoint config.
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8082"]
+        labels:
+          instance: traefik
+
+  # n8n internal metrics. Requires N8N_METRICS=true in the n8n container env
+  # (set in systems/n8n/config/compose.yaml). Exposes workflow execution counts,
+  # webhook hits, and node-level metrics — useful baseline once n8n is up.
+  - job_name: n8n
+    static_configs:
+      - targets: ["n8n:5678"]
+        labels:
+          instance: n8n
+
+  # Bare-metal node_exporter on dev-workstation (Ubuntu, runs Ollama + LLM workloads).
+  - job_name: node-exporter-dev-workstation
+    static_configs:
+      - targets: ["<dev-workstation-ip>:9100"]
+        labels:
+          instance: dev-workstation
+
+  # nvidia_gpu_exporter on dev-workstation — RTX 3060 utilization, VRAM, temp, power.
+  - job_name: nvidia-gpu
+    static_configs:
+      - targets: ["<dev-workstation-ip>:9835"]
+        labels:
+          instance: dev-workstation
+
+  # NUT UPS metrics via the hon95/prometheus-nut-exporter middleware container.
+  # Targets list the NUT servers (upsd); relabeling passes the server as the
+  # ?target= query param and redirects the actual scrape to the exporter on :9995.
+  # The exporter serves at /nut (its HTTP_PATH default), not /nut/metrics.
+  # upsd reads are anonymous. See systems/homelab-server/config/nut/ for the upsd
+  # side, and systems/monitoring/config/compose.yaml for the exporter service.
+  - job_name: nut
+    metrics_path: /nut
+    static_configs:
+      - targets: ["<homelab-server-ip>:3493"]
+        labels:
+          instance: homelab-server
+    relabel_configs:
+      # Move the UPS server address into the ?target= param the exporter expects,
+      - source_labels: [__address__]
+        target_label: __param_target
+      # then point the real HTTP scrape at the exporter. The static instance label
+      # above survives (no rule overwrites it), keeping naming consistent.
+      - target_label: __address__
+        replacement: "nut-exporter:9995"
+
+  # Pushgateway — receives metrics from cron-style jobs that can't be scraped
+  # directly. Currently the ota-tv HDHomeRun signal probe, which pushes a
+  # per-station signal sweep every ~10 min (systems/ota-tv/config/).
+  #
+  # honor_labels: true keeps the job/instance labels the probe set, rather than
+  # overwriting them with this scrape job's own.
+  #
+  # scrape_interval 5m, not 10m: the real resolution is the probe's 10-min push,
+  # but Prometheus marks a series stale if no sample lands within the 5-min
+  # query lookback window. Scraping the (already-pushed, cheap, local) gateway
+  # every 5m keeps the series continuous instead of gapping between pushes. It
+  # re-records the standing push once per interval — negligible for ~25 series.
+  - job_name: pushgateway
+    honor_labels: true
+    scrape_interval: 5m
+    static_configs:
+      - targets: ["pushgateway:9091"]
+        labels:
+          instance: pushgateway

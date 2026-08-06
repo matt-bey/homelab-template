@@ -1,0 +1,33 @@
+name: adguard-home
+
+services:
+  adguard-home:
+    image: adguard/adguardhome:latest
+    container_name: adguard
+    restart: unless-stopped
+    ports:
+      # DNS must stay as a direct binding — cannot route UDP through Traefik
+      # Bound to LAN IP only; 0.0.0.0:53 conflicts with systemd-resolved on loopback
+      - "<docker-host-ip>:53:53/tcp"
+      - "<docker-host-ip>:53:53/udp"
+      # Admin UI — direct access for initial setup and as fallback before Traefik is up
+      - "<docker-host-ip>:8888:3000"
+    volumes:
+      - adguard-work:/opt/adguardhome/work
+      - adguard-conf:/opt/adguardhome/conf
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.adguard.rule=Host(`adguard.lab.yourdomain.com`)"
+      - "traefik.http.routers.adguard.entrypoints=websecure"
+      - "traefik.http.routers.adguard.tls.certresolver=cloudflare"
+      - "traefik.http.services.adguard.loadbalancer.server.port=3000"
+
+volumes:
+  adguard-work:
+  adguard-conf:
+
+networks:
+  traefik-proxy:
+    external: true

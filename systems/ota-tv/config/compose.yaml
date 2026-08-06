@@ -1,0 +1,25 @@
+name: ota-tv
+
+services:
+  hdhomerun-probe:
+    build: .
+    image: hdhomerun-probe:local
+    container_name: hdhomerun-probe
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HDHR_ADDR: ${HDHR_ADDR:-<ota-tuner-ip>}
+      PUSHGATEWAY_URL: ${PUSHGATEWAY_URL:-pushgateway:9091}
+      PROBE_INTERVAL_SECONDS: ${PROBE_INTERVAL_SECONDS:-600}
+      TUNE_SETTLE_SECONDS: ${TUNE_SETTLE_SECONDS:-5}
+    # Joins the shared proxy network to reach the pushgateway by DNS name. The
+    # tuner at <ota-tuner-ip> (VLAN 30) is reached by egress NAT through the host
+    # default route, which requires the inter-VLAN firewall to permit
+    # docker-host -> <ota-tuner-ip> on the HDHomeRun control port (tcp/udp 65001).
+    networks:
+      - traefik-proxy
+    mem_limit: 96m
+
+networks:
+  traefik-proxy:
+    external: true

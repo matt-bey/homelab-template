@@ -1,0 +1,59 @@
+# Phase 1 smoke test ONLY — proves TLS termination + HTTPRoute routing end to end
+# through the Gateway. traefik/whoami echoes the request it received, so a successful
+# curl confirms the full path: DNS -> node:443 -> Envoy (our cert) -> route -> backend.
+#
+# Throwaway: delete once Phase 1 reachability is confirmed —
+#   kubectl delete -f systems/envoy-ai-gateway/config/k8s/smoke-echo.yaml
+# Not part of the steady-state MCP gateway, hence the floating image tag.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke-echo
+  namespace: aigw
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smoke-echo
+  template:
+    metadata:
+      labels:
+        app: smoke-echo
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke-echo
+  namespace: aigw
+spec:
+  selector:
+    app: smoke-echo
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: smoke-echo
+  namespace: aigw
+spec:
+  parentRefs:
+    - name: mcp-gateway
+  hostnames:
+    - mcp.lab.yourdomain.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: smoke-echo
+          port: 80

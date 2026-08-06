@@ -1,0 +1,50 @@
+name: n8n
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # External URL is how n8n constructs webhook URLs shown in the UI.
+      # Internal callers (Grafana) still reach it as http://n8n:5678 over traefik-proxy.
+      - N8N_HOST=n8n.lab.yourdomain.com
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.lab.yourdomain.com/
+      - N8N_PORT=5678
+      # Expose Prometheus metrics on /metrics so the monitoring stack can scrape n8n.
+      - N8N_METRICS=true
+      # Disable telemetry — homelab, no value in shipping usage data.
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      # Persist timezone for cron-style triggers.
+      - GENERIC_TIMEZONE=America/New_York
+      - TZ=America/New_York
+    volumes:
+      - n8n-data:/home/node/.n8n
+    # Workflow JSON exports are shipped via configs (works over Docker SSH context;
+    # bind mounts to local paths would resolve daemon-side and fail).
+    configs:
+      - source: grafana_to_ntfy_workflow
+        target: /workflows/grafana-to-ntfy.json
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.lab.yourdomain.com`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=cloudflare"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+      - "docker-volume-backup.stop-during-backup=true"
+
+configs:
+  grafana_to_ntfy_workflow:
+    file: ./workflows/grafana-to-ntfy.json
+
+volumes:
+  n8n-data:
+
+networks:
+  traefik-proxy:
+    external: true

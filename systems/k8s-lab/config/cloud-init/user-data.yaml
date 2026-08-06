@@ -1,0 +1,42 @@
+#cloud-config
+# k8s-lab — first-boot configuration
+# __SSH_KEY_TINKER__ and __SSH_KEY_MACBOOK__ are replaced by vm-create.sh before upload.
+
+hostname: k8s-lab
+fqdn: k8s-lab.local
+manage_etc_hosts: true
+
+users:
+  - name: admin
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_KEY_TINKER__
+      - __SSH_KEY_MACBOOK__
+
+timezone: America/New_York
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - ca-certificates
+  - gnupg
+  - qemu-guest-agent
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/hardening.conf
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin no
+      PubkeyAuthentication yes
+
+runcmd:
+  # Single-node k3s. Disable the bundled Traefik (Envoy Gateway is the ingress); keep
+  # servicelb (klipper) so Envoy Gateway's LoadBalancer Service binds the node IP.
+  # kubeconfig mode 0644 lets the `admin` user run kubectl without sudo (lab convenience).
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik --write-kubeconfig-mode=0644" sh -
+  - systemctl enable --now qemu-guest-agent

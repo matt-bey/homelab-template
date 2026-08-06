@@ -1,0 +1,22 @@
+apiVersion: 1
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://tempo:3200
+    access: proxy
+    isDefault: false
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        tags:
+          - key: container_name
+            value: container_name
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: false
+      serviceMap:
+        datasourceUid: prometheus

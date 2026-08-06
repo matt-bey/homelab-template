@@ -1,0 +1,23 @@
+# Certificate for the MCP gateway's public hostname.
+#
+# Lives in the `aigw` namespace so the resulting TLS Secret sits alongside the Gateway
+# that references it (a Gateway can only reference a Secret in its own namespace without
+# a ReferenceGrant). cert-manager writes the issued cert/key to `secretName`; the
+# Gateway listener's tls.certificateRefs points at that same Secret.
+#
+# DNS-01 was validated against letsencrypt-staging (issued Ready in ~92s on 2026-06-03),
+# then switched to letsencrypt-prod for a browser-trusted cert. To re-validate plumbing
+# without burning prod rate limits in future, flip issuerRef.name back to
+# letsencrypt-staging temporarily.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-lab-yourdomain-com
+  namespace: aigw
+spec:
+  secretName: mcp-lab-yourdomain-com-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - mcp.lab.yourdomain.com

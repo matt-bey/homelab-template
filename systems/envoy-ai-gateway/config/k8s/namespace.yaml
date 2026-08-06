@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aigw
+  labels:
+    # All POC gateway-layer resources (Gateway, MCPRoutes, Backends, the TLS cert)
+    # live here, kept out of the controllers' own *-system namespaces.
+    app.kubernetes.io/part-of: envoy-ai-gateway-poc

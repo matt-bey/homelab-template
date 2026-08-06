@@ -1,0 +1,18 @@
+# /etc/nut/upsd.users — copy to upsd.users and set real passwords (gitignored).
+#
+#   cp upsd.users.example upsd.users   # then edit passwords
+#
+# Keep the real file root-only: chmod 640 upsd.users && chown root:nut upsd.users
+
+# Local master — full monitor rights; this is the account upsmon logs in as to
+# receive shutdown notifications and drive the staged shutdown.
+[upsmon]
+    password = CHANGEME_upsmon_password
+    upsmon master
+
+# Read-only account, kept for a future authenticated client. NOTE: the current
+# Grafana exporter (hon95/prometheus-nut-exporter) reads variables ANONYMOUSLY
+# over TCP 3493 (NUT allows unauthenticated LIST), so this account is presently
+# unused. No upsmon role: it could read variables but never trigger a shutdown.
+[monuser]
+    password = CHANGEME_readonly_password

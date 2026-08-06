@@ -1,0 +1,5 @@
+# Real NUT files carrying passwords. Copy from the .example versions and fill in.
+upsd.users
+upsmon.conf
+# ntfy push settings — may carry an auth token. Seeded from ntfy.env.example.
+handlers/ntfy.env

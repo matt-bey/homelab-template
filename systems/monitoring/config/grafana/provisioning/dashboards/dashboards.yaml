@@ -1,0 +1,22 @@
+# Grafana dashboard provisioning.
+# Tells Grafana to load JSON dashboards from a directory inside the container.
+# https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+#
+# The container path /var/lib/grafana/dashboards is bind-mounted from
+# systems/monitoring/config/grafana/dashboards/ on the host. See compose.yaml.
+
+apiVersion: 1
+
+providers:
+  - name: file-default
+    orgId: 1
+    folder: ""
+    type: file
+    # Disable UI edits of provisioned dashboards — anything changed in the UI
+    # would be overwritten on next reload. Forces edits to go through git.
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

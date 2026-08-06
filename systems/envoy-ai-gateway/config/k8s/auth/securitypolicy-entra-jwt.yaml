@@ -1,0 +1,36 @@
+# Phase 2 VERIFICATION HARNESS — proves the Entra JWT wiring (issuer + audience + JWKS
+# signature) works in isolation, attached to the throwaway smoke-echo HTTPRoute. This is
+# the generic Envoy Gateway SecurityPolicy primitive; in Phase 3 the real per-tier
+# enforcement moves onto each MCPRoute's own spec.securityPolicy (oauth + authorization).
+# Delete this together with smoke-echo before Phase 3.
+#
+# Validates against the yourdomain.com Entra tenant:
+#   issuer   = https://login.microsoftonline.com/<tenant-id>/v2.0   (GUID form, not the
+#              custom domain — Entra always issues the GUID issuer for v2.0 tokens)
+#   audience = api://<app-client-id>  (the mcp-gateway app's Application ID URI)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: entra-jwt
+  namespace: aigw
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: smoke-echo
+  jwt:
+    providers:
+      - name: entra
+        issuer: https://login.microsoftonline.com/4a42d465-6b3e-49b7-8dad-549a296b4699/v2.0
+        audiences:
+          # Both forms — Entra may set aud to the App ID URI or the bare client GUID
+          # depending on the token flow. Listing both avoids an audience-mismatch surprise.
+          - api://7b3599d1-9636-4cd9-a803-beaac0fcb36b
+          - 7b3599d1-9636-4cd9-a803-beaac0fcb36b
+        remoteJWKS:
+          uri: https://login.microsoftonline.com/4a42d465-6b3e-49b7-8dad-549a296b4699/discovery/v2.0/keys
+          backendRefs:
+            - group: gateway.envoyproxy.io
+              kind: Backend
+              name: entra-jwks
+              port: 443

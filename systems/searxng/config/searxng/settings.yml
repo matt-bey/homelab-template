@@ -1,0 +1,10 @@
+use_default_settings: true
+
+server:
+  # No rate limiting — internal use, not a public instance
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

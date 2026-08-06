@@ -1,0 +1,58 @@
+# The gateway layer: a GatewayClass bound to Envoy Gateway's controller, an EnvoyProxy
+# that trims default resource requests for the small k8s-lab node, and the Gateway itself
+# terminating TLS for mcp.lab.yourdomain.com on 443.
+#
+# On k3s, Envoy Gateway provisions a Service of type LoadBalancer for this Gateway;
+# servicelb (klipper) binds it to the node IP (<k8s-lab-ip>) — that is the address the
+# AdGuard rewrite for mcp.lab.yourdomain.com points at. k3s's bundled Traefik is disabled,
+# so node:443 is free for Envoy to claim.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-ai-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: envoy-ai-gateway
+  namespace: aigw
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        container:
+          # Clear the large default CPU/memory requests so the proxy schedules
+          # comfortably on the 8 GB single node alongside the k3s control plane.
+          resources: {}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-gateway
+  namespace: aigw
+spec:
+  gatewayClassName: envoy-ai-gateway
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: mcp.lab.yourdomain.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: mcp-lab-yourdomain-com-tls
+      allowedRoutes:
+        # Phase 1 attaches an HTTPRoute (echo smoke test); Phase 3 widens this to
+        # also allow MCPRoute (group aigateway.envoyproxy.io) when the tiers land.
+        namespaces:
+          from: Same
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: envoy-ai-gateway

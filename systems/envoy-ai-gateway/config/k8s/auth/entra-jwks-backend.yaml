@@ -1,0 +1,35 @@
+# Reaching Entra's JWKS endpoint (login.microsoftonline.com) — which lives OUTSIDE the
+# cluster — requires two extra resources beyond just a URL:
+#   1. a Backend declaring the external host, and
+#   2. a BackendTLSPolicy so Envoy validates the upstream's TLS.
+# This is itself a transferable lesson for DBI: an in-cluster gateway validating tokens
+# from a public IdP has to be told how to egress + trust that IdP's cert.
+#
+# Public IdP, so wellKnownCACertificates: System uses the proxy image's system CA bundle
+# (Envoy Gateway >= v1.3 supports it with dynamic reload) — no CA ConfigMap to manage.
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: entra-jwks
+  namespace: aigw
+spec:
+  endpoints:
+    - fqdn:
+        hostname: login.microsoftonline.com
+        port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1alpha3
+kind: BackendTLSPolicy
+metadata:
+  name: entra-jwks-tls
+  namespace: aigw
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: entra-jwks
+      sectionName: "443"
+  validation:
+    wellKnownCACertificates: System
+    hostname: login.microsoftonline.com

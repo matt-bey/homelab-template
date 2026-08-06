@@ -1,0 +1,53 @@
+# Cloudflare DNS-01 ACME issuers for the yourdomain.com zone.
+#
+# Two issuers: start the cert against -staging to prove the DNS-01 plumbing without
+# burning Let's Encrypt production rate limits, then flip the Certificate's issuerRef
+# to -prod for a browser-trusted cert. The Cloudflare DNS-01 mechanism is already
+# proven on this zone by Traefik (docker-host), so prod-direct is also reasonable.
+#
+# ClusterIssuers read their token Secret from the cert-manager "cluster resource
+# namespace" (default: cert-manager), NOT from the app namespace. Create it there:
+#   kubectl create secret generic cloudflare-api-token \
+#     --namespace cert-manager \
+#     --from-literal=api-token='<CF_DNS_API_TOKEN>'
+# Token scope: Zone > DNS > Edit + Zone > Zone > Read, limited to yourdomain.com.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: your@email.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        selector:
+          dnsZones:
+            - yourdomain.com
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your@email.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        selector:
+          dnsZones:
+            - yourdomain.com

@@ -1,0 +1,20 @@
+# Grafana contact points.
+# https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+#
+# The n8n webhook is the only contact point. n8n receives raw Grafana alert JSON,
+# extracts the severity label, and POSTs a clean ntfy notification with the right
+# priority. The webhook is reached over the traefik-proxy network by container DNS —
+# never via the public HTTPS path.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: n8n-relay
+    receivers:
+      - uid: n8n-relay-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://n8n:5678/webhook/grafana
+          httpMethod: POST

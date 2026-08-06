@@ -1,0 +1,60 @@
+name: backups
+
+services:
+  docker-volume-backup:
+    image: offen/docker-volume-backup:latest
+    container_name: docker-volume-backup
+    restart: unless-stopped
+    environment:
+      BACKUP_CRON_EXPRESSION: "0 3 * * 0"
+      BACKUP_FILENAME: "backup-%Y-%m-%dT%H-%M-%S.tar.gz"
+      BACKUP_RETENTION_DAYS: "56"
+      BACKUP_ARCHIVE_COMPRESSION: "gz"
+    networks:
+      - traefik-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /mnt/backups:/archive
+      # adguard-home
+      - adguard-home_adguard-conf:/backup/adguard-conf:ro
+      - adguard-home_adguard-work:/backup/adguard-work:ro
+      # monitoring
+      - monitoring_grafana-data:/backup/grafana-data:ro
+      - monitoring_prometheus-data:/backup/prometheus-data:ro
+      # mosquitto
+      # - mosquitto_mosquitto-data:/backup/mosquitto-data:ro
+      # n8n
+      - n8n_n8n-data:/backup/n8n-data:ro
+      # ntfy
+      - ntfy_ntfy-cache:/backup/ntfy-cache:ro
+      # open-webui
+      - open-webui_open-webui-data:/backup/open-webui-data:ro
+      # traefik
+      - traefik_traefik-letsencrypt:/backup/traefik-letsencrypt:ro
+      # uptime-kuma
+      - uptime-kuma_uptime-kuma-data:/backup/uptime-kuma-data:ro
+
+volumes:
+  adguard-home_adguard-conf:
+    external: true
+  adguard-home_adguard-work:
+    external: true
+  monitoring_grafana-data:
+    external: true
+  monitoring_prometheus-data:
+    external: true
+  # mosquitto_mosquitto-data: excluded — mosquitto not yet deployed
+  n8n_n8n-data:
+    external: true
+  ntfy_ntfy-cache:
+    external: true
+  open-webui_open-webui-data:
+    external: true
+  traefik_traefik-letsencrypt:
+    external: true
+  uptime-kuma_uptime-kuma-data:
+    external: true
+
+networks:
+  traefik-proxy:
+    external: true

@@ -1,0 +1,130 @@
+name: traefik
+
+services:
+  traefik:
+    image: traefik:v3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    configs:
+      - source: traefik_config
+        target: /etc/traefik/traefik.yaml
+      - source: traefik_dynamic_proxmox
+        target: /etc/traefik/dynamic/proxmox.yaml
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      # Request the wildcard cert here; all other routers inherit it automatically
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.lab.yourdomain.com`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
+      - "traefik.http.routers.traefik-dashboard.tls.domains[0].main=lab.yourdomain.com"
+      - "traefik.http.routers.traefik-dashboard.tls.domains[0].sans=*.lab.yourdomain.com"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
+
+configs:
+  traefik_config:
+    content: |
+      global:
+        checkNewVersion: false
+        sendAnonymousUsage: false
+
+      # Traefik v3 defaults to ERROR level — too quiet for steady-state
+      # observability and silent in the failure modes that matter (cert
+      # renewals, provider discovery, routing decisions). INFO is the
+      # right baseline; bump to DEBUG only when troubleshooting.
+      log:
+        level: INFO
+
+      api:
+        dashboard: true
+
+      entryPoints:
+        web:
+          address: ":80"
+          http:
+            redirections:
+              entryPoint:
+                to: websecure
+                scheme: https
+        websecure:
+          address: ":443"
+        # Internal-only entryPoint for Prometheus scraping.
+        # Not published to the host — reached over traefik-proxy by container DNS.
+        metrics:
+          address: ":8082"
+
+      metrics:
+        prometheus:
+          entryPoint: metrics
+          addRoutersLabels: true
+
+      tracing:
+        otlp:
+          grpc:
+            endpoint: tempo:4317
+            insecure: true
+
+      certificatesResolvers:
+        cloudflare:
+          acme:
+            email: your@email.com
+            storage: /letsencrypt/acme.json
+            dnsChallenge:
+              provider: cloudflare
+              # Use Cloudflare's own resolvers to avoid propagation races
+              resolvers:
+                - "1.1.1.1:53"
+                - "1.0.0.1:53"
+
+      providers:
+        docker:
+          exposedByDefault: false
+          network: traefik-proxy
+        # File provider for external (non-Docker) backends — Proxmox web UI, etc.
+        # Docker labels can't reach services off the container network; the file
+        # provider is how Traefik learns about hosts it doesn't auto-discover.
+        file:
+          directory: /etc/traefik/dynamic
+          watch: true
+
+  traefik_dynamic_proxmox:
+    content: |
+      # Reverse proxy for Proxmox web UI on homelab-server.
+      # Proxmox listens on https://<homelab-server-ip>:8006 with a self-signed cert;
+      # insecureSkipVerify is acceptable here because the hop is LAN-only and the
+      # browser-facing TLS is the trusted wildcard cert from Traefik.
+      http:
+        routers:
+          proxmox:
+            rule: "Host(`proxmox.lab.yourdomain.com`)"
+            entryPoints:
+              - websecure
+            service: proxmox
+            tls:
+              certResolver: cloudflare
+        services:
+          proxmox:
+            loadBalancer:
+              servers:
+                - url: "https://<homelab-server-ip>:8006"
+              serversTransport: proxmox-tls
+        serversTransports:
+          proxmox-tls:
+            insecureSkipVerify: true
+
+volumes:
+  traefik-letsencrypt:
+
+networks:
+  traefik-proxy:
+    external: true

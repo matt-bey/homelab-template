@@ -1,0 +1,253 @@
+# Grafana alert rules.
+# https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+#
+# Each rule uses the standard A/B/C query pattern that Grafana's UI generates:
+#   A = PromQL query
+#   B = reducer (last) — collapses A's time series into a single value
+#   C = threshold — fire condition over B
+#
+# The `condition: C` field tells the alerting engine which query result decides fire/no-fire.
+# The `__expr__` datasource UID is Grafana's built-in expression engine — required for B and C.
+#
+# severity label drives the n8n → ntfy Priority mapping:
+#   severity: high    -> ntfy Priority: 4 (loud)
+#   severity: default -> ntfy Priority: 3 (normal)
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: homelab
+    folder: Homelab
+    interval: 1m
+    rules:
+      # --------------------------------------------------------------------
+      - uid: mem-pressure
+        title: Memory pressure
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: high
+        annotations:
+          summary: "{{ $labels.instance }}: less than 2 GiB free RAM"
+          description: |
+            node_memory_MemAvailable_bytes on {{ $labels.instance }} dropped below 2 GiB
+            for 5 minutes. Current: {{ humanize $values.B.Value }}B.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: node_memory_MemAvailable_bytes
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    # 2 GiB in bytes.
+                    params: [2147483648]
+
+      # --------------------------------------------------------------------
+      - uid: disk-fill-high
+        title: Disk filling (high)
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: high
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }}: > 80% full"
+          description: |
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is over 80% full.
+            Current: {{ humanizePercentage $values.B.Value }}.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |
+                (node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"}
+                 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"})
+                / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"}
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.80]
+
+      # --------------------------------------------------------------------
+      - uid: disk-fill-warn
+        title: Disk filling (warn)
+        condition: C
+        for: 15m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: default
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }}: > 70% full"
+          description: |
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is over 70% full.
+            Current: {{ humanizePercentage $values.B.Value }}.
+            (Also expect the high alert to fire if this crosses 80%.)
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |
+                (node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"}
+                 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"})
+                / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs"}
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.70]
+
+      # --------------------------------------------------------------------
+      - uid: thin-pool-fill
+        title: Proxmox thin pool filling
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: high
+        annotations:
+          summary: "Proxmox thin pool {{ $labels.vg }}/{{ $labels.pool }}: > 80% data extents used"
+          description: |
+            LVM thin pool {{ $labels.vg }}/{{ $labels.pool }} on {{ $labels.instance }}
+            is over 80% data extents used. Current: {{ $values.B.Value }}%.
+            Source: lvm-textfile.sh → node-exporter textfile collector.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: node_lvm_thin_pool_data_percent_used{instance="homelab-server"}
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [80]
+
+      # --------------------------------------------------------------------
+      - uid: container-restart-loop
+        title: Container restart loop
+        condition: C
+        # No `for:` — the 5m window is already baked into the PromQL.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: high
+        annotations:
+          summary: "{{ $labels.name }}: > 3 restarts in 5 minutes"
+          description: |
+            Container {{ $labels.name }} on {{ $labels.instance }} started
+            {{ $values.B.Value }} times in the last 5 minutes — likely a crash loop.
+            cAdvisor doesn't expose a direct restart counter, so we count changes to
+            container_start_time_seconds.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: changes(container_start_time_seconds{name!=""}[5m])
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange: { from: 0, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3]

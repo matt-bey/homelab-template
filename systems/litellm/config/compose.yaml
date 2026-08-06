@@ -1,0 +1,101 @@
+name: litellm
+
+services:
+  litellm:
+    # See runbook.md "Upgrading" before bumping — versions 1.82.7 and 1.82.8 were compromised.
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - OTEL_SERVICE_NAME=litellm
+      - OTEL_RESOURCE_ATTRIBUTES=container_name=litellm
+    configs:
+      - source: litellm_config
+        target: /app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    # No in-container healthcheck: main-stable dropped curl; the failing probe
+    # marks the container unhealthy and Traefik refuses to route to it.
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.litellm.rule=Host(`litellm.lab.yourdomain.com`)"
+      - "traefik.http.routers.litellm.entrypoints=websecure"
+      - "traefik.http.routers.litellm.tls.certresolver=cloudflare"
+      - "traefik.http.services.litellm.loadbalancer.server.port=4000"
+
+configs:
+  litellm_config:
+    content: |
+      model_list:
+        - model_name: claude-sonnet-4-6
+          litellm_params:
+            model: anthropic/claude-sonnet-4-6
+            api_key: os.environ/ANTHROPIC_API_KEY
+
+        - model_name: local-default
+          litellm_params:
+            model: ollama_chat/qwen3.5:9b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 16384
+            extra_body:
+              think: false
+
+        - model_name: local-default-think
+          litellm_params:
+            model: ollama_chat/qwen3.5:9b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 16384
+            extra_body:
+              think: true
+
+        - model_name: claude-local-default
+          litellm_params:
+            model: ollama_chat/qwen3.5:9b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 16384
+            extra_body:
+              think: false
+
+        - model_name: local-coder
+          litellm_params:
+            model: ollama_chat/qwen2.5-coder:14b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 16384
+
+        - model_name: local-stem
+          litellm_params:
+            model: ollama_chat/phi4:14b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 16384
+
+        - model_name: local-fast
+          litellm_params:
+            model: ollama_chat/qwen3.5:4b
+            api_base: os.environ/OLLAMA_BASE_URL
+            num_ctx: 8192
+            extra_body:
+              think: false
+
+
+      search_tools:
+        - search_tool_name: searxng
+          litellm_params:
+            search_provider: searxng
+            api_base: http://searxng:8080
+
+      litellm_settings:
+        drop_params: true
+        success_callback: ["otel"]
+        failure_callback: ["otel"]
+
+      general_settings:
+        master_key: os.environ/LITELLM_MASTER_KEY
+        forward_client_headers_to_llm_api: true
+        allow_requests_on_db_unavailable: true
+
+networks:
+  traefik-proxy:
+    external: true

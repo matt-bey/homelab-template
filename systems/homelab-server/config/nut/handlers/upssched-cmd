@@ -1,0 +1,69 @@
+#!/bin/sh
+# /etc/nut/handlers/upssched-cmd — dispatcher invoked by upssched (CMDSCRIPT).
+#
+# $1 is the event/timer label. Two kinds of jobs:
+#   - immediate notifications: onbatt / online / lowbatt -> push to ntfy
+#   - staged shutdown timers:  stage1 / stage2 -> LAYER 2, still log-only stubs
+#     (parked until the UniFi API token + container list exist post-UDM-install).
+#
+# This runs as root (upsmon/upssched are root). ntfy settings come from ntfy.env
+# (gitignored; see ntfy.env.example). See ../../../network/plan.md "UPS power
+# management" and ../../decisions.md.
+
+NTFY_ENV="/etc/nut/handlers/ntfy.env"
+[ -f "$NTFY_ENV" ] && . "$NTFY_ENV"
+
+# notify <priority> <tags> <title> <message> — best-effort push to ntfy.
+# Never fails the caller: a down/unreachable ntfy must not block a shutdown.
+notify() {
+    prio="$1"; tags="$2"; title="$3"; msg="$4"
+    if [ -z "${NTFY_URL:-}" ] || [ -z "${NTFY_TOPIC:-}" ]; then
+        logger -t upssched "ntfy not configured; skipping push: ${title}"
+        return 0
+    fi
+    url="${NTFY_URL%/}/${NTFY_TOPIC}"
+    # Duplicated curl rather than conditional args — POSIX sh word-splits the
+    # auth header badly otherwise.
+    if [ -n "${NTFY_TOKEN:-}" ]; then
+        curl -fsS -m 10 -H "Authorization: Bearer ${NTFY_TOKEN}" \
+            -H "Title: ${title}" -H "Priority: ${prio}" -H "Tags: ${tags}" \
+            -d "${msg}" "${url}" >/dev/null 2>&1 \
+            || logger -t upssched "ntfy push failed: ${title}"
+    else
+        curl -fsS -m 10 \
+            -H "Title: ${title}" -H "Priority: ${prio}" -H "Tags: ${tags}" \
+            -d "${msg}" "${url}" >/dev/null 2>&1 \
+            || logger -t upssched "ntfy push failed: ${title}"
+    fi
+}
+
+case "$1" in
+    onbatt)
+        logger -t upssched "ONBATT: mains lost, on battery"
+        notify high "warning,electric_plug" "UPS on battery" \
+            "Power lost — homelab UPS switched to battery. Staged shutdown armed (PoE shed T+5m, containers T+10m)."
+        ;;
+    online)
+        logger -t upssched "ONLINE: mains restored"
+        notify default "white_check_mark,electric_plug" "UPS power restored" \
+            "Mains power restored — homelab UPS back online. Pending shutdown timers cancelled."
+        ;;
+    lowbatt)
+        logger -t upssched "LOWBATT: low battery, graceful shutdown beginning"
+        notify max "rotating_light,low_battery" "UPS low battery — shutting down" \
+            "Battery low — homelab is performing a graceful shutdown now."
+        ;;
+    stage1)
+        logger -t upssched "STAGE1 (T+5m): would disable PoE on basement + SE-office AP ports"
+        # TODO: curl the UniFi API to set PoE override 'off' on those two LAN ports.
+        #       Record the port->AP mapping in deployment.md (plan checklist item).
+        ;;
+    stage2)
+        logger -t upssched "STAGE2 (T+10m): would stop non-essential containers on docker-host"
+        # TODO: ssh docker-host to `docker compose stop` the non-essential stacks,
+        #       keeping the Tailscale subnet router, monitoring, and core inference up.
+        ;;
+    *)
+        logger -t upssched "upssched-cmd: unknown label '$1'"
+        ;;
+esac

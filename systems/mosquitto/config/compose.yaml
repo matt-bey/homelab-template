@@ -1,0 +1,38 @@
+name: mosquitto
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    configs:
+      - source: mosquitto_config
+        target: /mosquitto/config/mosquitto.conf
+
+configs:
+  mosquitto_config:
+    content: |
+      # Plain MQTT — Pi/Arduino/ESP clients on the LAN
+      listener 1883
+      allow_anonymous true
+
+      # WebSocket listener — browser clients and future dashboards
+      listener 9001
+      protocol websockets
+      allow_anonymous true
+
+      persistence true
+      persistence_location /mosquitto/data/
+
+      log_dest stdout
+      log_type error
+      log_type warning
+      log_type notice
+
+volumes:
+  mosquitto-data:

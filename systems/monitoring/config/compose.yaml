@@ -1,0 +1,226 @@
+name: monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # 15-day retention; revisit once disk usage is understood (plan open question).
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    volumes:
+      - prometheus-data:/prometheus
+    configs:
+      - source: prometheus_yml
+        target: /etc/prometheus/prometheus.yml
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.lab.yourdomain.com`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=cloudflare"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      # Reuse the same basicauth middleware defined on the Traefik dashboard container.
+      - "traefik.http.routers.prometheus.middlewares=dashboard-auth@docker"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - grafana-data:/var/lib/grafana
+    configs:
+      - source: gf_datasource_prometheus
+        target: /etc/grafana/provisioning/datasources/prometheus.yaml
+      - source: gf_dashboards_provider
+        target: /etc/grafana/provisioning/dashboards/dashboards.yaml
+      - source: gf_alerting_contact_points
+        target: /etc/grafana/provisioning/alerting/contact-points.yaml
+      - source: gf_alerting_notification_policies
+        target: /etc/grafana/provisioning/alerting/notification-policies.yaml
+      - source: gf_alerting_rules
+        target: /etc/grafana/provisioning/alerting/rules.yaml
+      - source: gf_dashboard_node_exporter
+        target: /var/lib/grafana/dashboards/node-exporter-full.json
+      - source: gf_dashboard_cadvisor
+        target: /var/lib/grafana/dashboards/docker-cadvisor.json
+      - source: gf_dashboard_traefik
+        target: /var/lib/grafana/dashboards/traefik.json
+      - source: gf_dashboard_nvidia_gpu
+        target: /var/lib/grafana/dashboards/nvidia-gpu.json
+      - source: gf_dashboard_nut
+        target: /var/lib/grafana/dashboards/nut.json
+      - source: gf_dashboard_ota_tv_signal
+        target: /var/lib/grafana/dashboards/ota-tv-signal.json
+      - source: gf_datasource_loki
+        target: /etc/grafana/provisioning/datasources/loki.yaml
+      - source: gf_datasource_tempo
+        target: /etc/grafana/provisioning/datasources/tempo.yaml
+    networks:
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.lab.yourdomain.com`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=cloudflare"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "docker-volume-backup.stop-during-backup=true"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    container_name: cadvisor
+    restart: unless-stopped
+    # Privileged is cAdvisor's documented baseline for cgroup v2 hosts.
+    # The principled alternative is cap_add: [SYS_ADMIN] + explicit devices,
+    # but that adds failure modes without meaningful security gain in a homelab.
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    command:
+      - "--docker_only=true"
+      - "--housekeeping_interval=30s"
+      # Docker 29+ uses io.containerd.snapshotter.v1 (no layerdb/mounts/), so
+      # point cAdvisor at the containerd socket directly. /var/run is already
+      # bind-mounted, so the socket is available at this path inside the container.
+      - "--containerd=/var/run/containerd/containerd.sock"
+    networks:
+      - traefik-proxy
+
+  node-exporter:
+    image: prom/node-exporter:v1
+    container_name: node-exporter
+    restart: unless-stopped
+    # Bind-mount the VM's /proc, /sys, and / so node-exporter sees the host's
+    # view rather than its own container namespace.
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    pid: host
+    networks:
+      - traefik-proxy
+
+  loki:
+    image: grafana/loki:3
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - traefik-proxy
+    mem_limit: 512m
+
+  promtail:
+    image: grafana/promtail:3
+    container_name: promtail
+    restart: unless-stopped
+    # root required to read /var/run/docker.sock for Docker service discovery
+    user: root
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+    networks:
+      - traefik-proxy
+    mem_limit: 128m
+
+  nut-exporter:
+    image: hon95/prometheus-nut-exporter:1
+    container_name: nut-exporter
+    restart: unless-stopped
+    # Middleware exporter for the CyberPower CP1500 on the Proxmox host. Prometheus
+    # scrapes /nut?target=<nut-server>:3493 (the exporter's HTTP_PATH default is
+    # "nut", so the route is /nut); the exporter connects out to upsd and reads
+    # variables anonymously (no NUT credentials needed). The NUT server address is
+    # supplied per-scrape by Prometheus, so there's no config here. See
+    # systems/homelab-server/config/nut/ for the upsd side.
+    networks:
+      - traefik-proxy
+    mem_limit: 64m
+
+  pushgateway:
+    image: prom/pushgateway:v1
+    container_name: pushgateway
+    restart: unless-stopped
+    # Holds metrics pushed by cron-style jobs that can't be scraped on demand.
+    # Currently the ota-tv HDHomeRun signal probe (systems/ota-tv/config/)
+    # pushes a per-station signal sweep every ~10 min. No host port — Prometheus
+    # scrapes it internally on :9091. See prometheus.yml.
+    networks:
+      - traefik-proxy
+    mem_limit: 64m
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - traefik-proxy
+    mem_limit: 512m
+    # No ports: block — OTLP (4317/4318) are internal to traefik-proxy network only
+
+configs:
+  prometheus_yml:
+    file: ./prometheus.yml
+  gf_datasource_prometheus:
+    file: ./grafana/provisioning/datasources/prometheus.yaml
+  gf_dashboards_provider:
+    file: ./grafana/provisioning/dashboards/dashboards.yaml
+  gf_alerting_contact_points:
+    file: ./grafana/provisioning/alerting/contact-points.yaml
+  gf_alerting_notification_policies:
+    file: ./grafana/provisioning/alerting/notification-policies.yaml
+  gf_alerting_rules:
+    file: ./grafana/provisioning/alerting/rules.yaml
+  gf_dashboard_node_exporter:
+    file: ./grafana/dashboards/node-exporter-full.json
+  gf_dashboard_cadvisor:
+    file: ./grafana/dashboards/docker-cadvisor.json
+  gf_dashboard_traefik:
+    file: ./grafana/dashboards/traefik.json
+  gf_dashboard_nvidia_gpu:
+    file: ./grafana/dashboards/nvidia-gpu.json
+  gf_dashboard_nut:
+    file: ./grafana/dashboards/nut.json
+  gf_dashboard_ota_tv_signal:
+    file: ./grafana/dashboards/ota-tv-signal.json
+  gf_datasource_loki:
+    file: ./grafana/provisioning/datasources/loki.yaml
+  gf_datasource_tempo:
+    file: ./grafana/provisioning/datasources/tempo.yaml
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:
+
+networks:
+  traefik-proxy:
+    external: true
